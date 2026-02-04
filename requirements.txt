@@ -1,0 +1,56 @@
+# Core
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+pydantic==2.9.0
+pydantic-settings==2.5.0
+
+# Database
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.3
+pgvector==0.3.5
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# HTTP
+httpx==0.27.0
+python-multipart==0.0.12
+
+# Background Jobs
+arq==0.26.1
+
+# File Processing - Simple parser (PARSER_TYPE=simple)
+pypdf==4.3.0
+python-docx==1.1.2
+beautifulsoup4==4.12.3
+lxml==5.3.0
+openpyxl==3.1.5
+pandas==2.2.3
+
+# File Processing - Docling parser (PARSER_TYPE=docling)
+# Install separately with CPU-only PyTorch to save disk:
+#   pip install docling --extra-index-url https://download.pytorch.org/whl/cpu
+
+# AI Models (HuggingFace provider - optional, if not using Ollama for all)
+# sentence-transformers==3.0.0   # For e5-small, BGE-M3 embeddings
+# transformers==4.44.0           # For Arctic-Text2SQL via HuggingFace
+# torch==2.4.0                   # For HuggingFace model inference
+
+# DB Connector
+cryptography==43.0.0
+# aiomysql==0.2.0               # Uncomment for MySQL support
+# aiosqlite==0.20.0             # Uncomment for SQLite support
+
+# Storage
+minio==7.2.9
+
+# Utils
+python-slugify==8.0.4
+orjson==3.10.7
+
+# Dev / Test
+pytest==8.3.0
+pytest-asyncio==0.24.0
+ruff==0.6.0
