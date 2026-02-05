@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+**/_pycache__/
+**__pycache__/
+**/_pycache/
+**__pycache/
+**/_pycache/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment variables
+.env
+docker-compose.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Test / Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Uploads (local dev)
+uploads/
+
+# Models (if downloaded locally)
+models/
+*.md
+**/*.md
+!README.md
