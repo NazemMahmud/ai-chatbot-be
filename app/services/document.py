@@ -34,6 +34,7 @@ class DocumentService:
         name: str,
         file_content: bytes,
         mime_type: str,
+        organization_id: uuid.UUID,
         parser_type: Optional[DocumentParserType] = None,
         bot_ids: Optional[list[uuid.UUID]] = None,
     ) -> Document:
@@ -44,6 +45,7 @@ class DocumentService:
             name: Original filename
             file_content: Raw file bytes
             mime_type: MIME type
+            organization_id: Organization that owns this document
             parser_type: Parser mode (simple/docling), uses default if None
             bot_ids: List of bot UUIDs to associate (optional, can be None/empty)
 
@@ -53,7 +55,7 @@ class DocumentService:
         # 1. Save file to storage
         file_path = await self.storage.save(file_content, name, mime_type)
 
-        # 2. Create document record (no bot_id column anymore)
+        # 2. Create document record
         document = Document(
             name=name,
             source_type=DocumentSourceType.FILE,
@@ -61,15 +63,15 @@ class DocumentService:
             file_size=len(file_content),
             mime_type=mime_type,
             parser_type=parser_type,
+            organization_id=organization_id,
             status=DocumentStatus.PENDING,
         )
 
         self.db.add(document)
-        await self.db.flush()  # assigns document.id without committing
+        await self.db.flush()
 
         # 3. Link bots via join table (if any bot_ids provided)
         if bot_ids:
-            # Validate all bot IDs exist in a single query
             result = await self.db.execute(
                 select(Bot.id).where(Bot.id.in_(bot_ids))
             )
@@ -84,13 +86,13 @@ class DocumentService:
             for bid in bot_ids:
                 self.db.add(DocumentBot(document_id=document.id, bot_id=bid))
 
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(document)
 
         return document
 
     # ------------------------------------------------------------------
-    # PROCESS (called by worker)
+    # PROCESS (called by worker — no org scoping needed)
     # ------------------------------------------------------------------
 
     async def process_document(self, document_id: uuid.UUID) -> Document:
@@ -176,9 +178,17 @@ class DocumentService:
         )
         return result.scalar_one_or_none()
 
-    async def get_document(self, document_id: uuid.UUID) -> Document:
-        """Get document by ID or raise 404."""
-        document = await self._get_document_or_none(document_id)
+    async def get_document(
+        self, document_id: uuid.UUID, organization_id: uuid.UUID
+    ) -> Document:
+        """Get document by ID scoped to organization, or raise 404."""
+        result = await self.db.execute(
+            select(Document).where(
+                Document.id == document_id,
+                Document.organization_id == organization_id,
+            )
+        )
+        document = result.scalar_one_or_none()
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -188,24 +198,25 @@ class DocumentService:
 
     async def list_documents(
         self,
+        organization_id: uuid.UUID,
         bot_id: Optional[uuid.UUID] = None,
         doc_status: Optional[DocumentStatus] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> DocumentListData:
-        """List documents with optional bot_id and status filters, paginated."""
-        query = select(Document)
-        count_query = select(func.count()).select_from(Document)
+        """List documents scoped to organization with optional filters."""
+        query = select(Document).where(Document.organization_id == organization_id)
+        count_query = select(func.count()).select_from(Document).where(
+            Document.organization_id == organization_id
+        )
 
         if bot_id is not None:
-            # Validate bot exists
-            bot_result = await self.db.execute(select(Bot).where(Bot.id == bot_id))
-            if not bot_result.scalar_one_or_none():
+            result = await self.db.execute(select(Bot).where(Bot.id == bot_id))
+            if not result.scalar_one_or_none():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Bot not found",
                 )
-            # Filter via the join table
             query = query.where(
                 Document.id.in_(
                     select(DocumentBot.document_id).where(DocumentBot.bot_id == bot_id)
@@ -235,14 +246,14 @@ class DocumentService:
     # DELETE
     # ------------------------------------------------------------------
 
-    async def delete_document(self, document_id: uuid.UUID) -> None:
+    async def delete_document(
+        self, document_id: uuid.UUID, organization_id: uuid.UUID
+    ) -> None:
         """Delete document, its chunks, and join-table rows. Raises 404 if not found."""
-        document = await self.get_document(document_id)
+        document = await self.get_document(document_id, organization_id)
 
-        # Delete file from storage
         if document.file_path:
             await self.storage.delete(document.file_path)
 
-        # Delete document (cascades to chunks + document_bots via ON DELETE CASCADE)
         await self.db.delete(document)
         await self.db.commit()

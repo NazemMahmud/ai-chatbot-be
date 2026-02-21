@@ -8,6 +8,12 @@ from app.schemas.document import (
     DocumentListData,
     URLIngestRequest,
 )
+from app.schemas.auth import (
+    RegisterRequest,
+    LoginRequest,
+    TokenResponse,
+    UserInfo,
+)
 
 __all__ = [
     "ApiResponse",
@@ -21,4 +27,8 @@ __all__ = [
     "DocumentStatusData",
     "DocumentListData",
     "URLIngestRequest",
+    "RegisterRequest",
+    "LoginRequest",
+    "TokenResponse",
+    "UserInfo",
 ]
