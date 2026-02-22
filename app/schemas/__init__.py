@@ -14,6 +14,14 @@ from app.schemas.auth import (
     TokenResponse,
     UserInfo,
 )
+from app.schemas.chat import (
+    ChatRequest,
+    ChatResponse,
+    SourceChunk,
+    MessageResponse,
+    ConversationResponse,
+    ConversationListData,
+)
 
 __all__ = [
     "ApiResponse",
@@ -31,4 +39,10 @@ __all__ = [
     "LoginRequest",
     "TokenResponse",
     "UserInfo",
+    "ChatRequest",
+    "ChatResponse",
+    "SourceChunk",
+    "MessageResponse",
+    "ConversationResponse",
+    "ConversationListData",
 ]

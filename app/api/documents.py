@@ -32,7 +32,7 @@ async def upload_document(
     current_user: CurrentUser,
     data_file: UploadFile = File(..., description="The document file to upload"),
     bot_ids: Optional[str] = Form(None, description="JSON array of bot UUIDs (optional)"),
-    parser_type: str = Form(..., description="Parser type: 'simple' or 'docling'"),
+    parser_type: str = Form(..., description="Parser type: 'simple' or 'advanced'"),
 ):
     """
     Upload a document for processing.

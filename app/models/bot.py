@@ -16,6 +16,12 @@ class Bot(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="My Chatbot")
     description: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(
+        Text, default="You are a helpful assistant."
+    )
+    welcome_message: Mapped[str | None] = mapped_column(
+        Text, default="Hi! How can I help you?"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

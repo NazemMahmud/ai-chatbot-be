@@ -9,6 +9,8 @@ from pydantic_core import PydanticCustomError
 class BotCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    welcome_message: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -16,7 +18,7 @@ class BotCreate(BaseModel):
         if "name" not in data:
             raise PydanticCustomError("required", "Bot name is required")
         return data
-    
+
     @field_validator("name", mode="before")
     @classmethod
     def validate_name(cls, v):
@@ -37,10 +39,26 @@ class BotCreate(BaseModel):
             raise PydanticCustomError("max_length", "Description must be at most 1000 characters")
         return v
 
+    @field_validator("system_prompt", mode="before")
+    @classmethod
+    def validate_system_prompt(cls, v):
+        if v is not None and not isinstance(v, str):
+            raise PydanticCustomError("type_error", "System prompt must be a string")
+        return v
+
+    @field_validator("welcome_message", mode="before")
+    @classmethod
+    def validate_welcome_message(cls, v):
+        if v is not None and not isinstance(v, str):
+            raise PydanticCustomError("type_error", "Welcome message must be a string")
+        return v
+
 
 class BotUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    welcome_message: Optional[str] = None
     is_active: Optional[bool] = None
 
     @field_validator("name", mode="before")
@@ -81,14 +99,9 @@ class BotResponse(BaseModel):
     id: uuid.UUID
     name: str
     description: str | None
+    system_prompt: str | None
+    welcome_message: str | None
     is_active: bool
-    # created_at: datetime
-    # updated_at: datetime
-
-    # system_prompt: str | None
-    # model: str
-    # temperature: float
-    # max_tokens: int
 
     model_config = {"from_attributes": True}
 

@@ -59,7 +59,7 @@ class DocumentUploadRequest(BaseModel):
     )
     parser_type: DocumentParserType = Field(
         ...,
-        description="Parser type: 'simple' or 'docling'. Required.",
+        description="Parser type: 'simple' or 'advanced'. Required.",
     )
 
     # ----- File validators -----
@@ -142,7 +142,7 @@ class DocumentUploadRequest(BaseModel):
         if v is None or v == "" or v == "null":
             raise PydanticCustomError(
                 "required",
-                "Parser type is required. Must be 'simple' or 'docling'",
+                "Parser type is required. Must be 'simple' or 'advanced'",
             )
         if isinstance(v, str):
             v = v.strip().lower()
@@ -165,7 +165,7 @@ class DocumentUploadRequest(BaseModel):
         ):
             raise PydanticCustomError(
                 "image_parser_mismatch",
-                "Image files require parser_type 'docling'",
+                "Image files require the 'advanced' parser type for OCR processing",
             )
         return self
 

@@ -17,6 +17,8 @@ class BotService:
         bot = Bot(
             name=bot.name,
             description=bot.description,
+            system_prompt=bot.system_prompt,
+            welcome_message=bot.welcome_message,
             is_active=True,
             organization_id=organization_id,
         )
