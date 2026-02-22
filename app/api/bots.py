@@ -26,7 +26,7 @@ async def create_bot(
     """Create a new bot."""
     service = BotService(db)
     bot = await service.create_bot(data, current_user.organization_id)
-    return ApiResponse(success=True, message="Bot created successfully", data=bot)
+    return ApiResponse(success=True, message="Bot created successfully", data=bot, statusCode=status.HTTP_201_CREATED)
 
 
 @router.get("", response_model=ApiResponse[BotListData])

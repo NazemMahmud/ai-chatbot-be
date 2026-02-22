@@ -11,32 +11,32 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post(
-    "/register",
+    "/signup",
     response_model=ApiResponse[None],
     status_code=status.HTTP_201_CREATED,
 )
 async def register(data: RegisterRequest, service: AuthServiceDep):
     """Register a new user and create an organization."""
     await service.register(data)
-    return ApiResponse(success=True, message="Registration successful")
+    return ApiResponse(success=True, message="Registration successful", statusCode=status.HTTP_201_CREATED)
 
 
-@router.post("/login", response_model=ApiResponse[TokenResponse])
+@router.post("/signin", response_model=ApiResponse[TokenResponse])
 async def login(data: LoginRequest, service: AuthServiceDep):
     """Login with email and password."""
     result = await service.login(data.email, data.password)
-    return ApiResponse(success=True, message="Login successful", data=result)
+    return ApiResponse(success=True, message="Login successful", data=result, statusCode=status.HTTP_200_OK)
 
 
 @router.post("/logout", response_model=ApiResponse[None])
 async def logout(current_user: CurrentUser, service: AuthServiceDep):
     """Logout and invalidate the current token."""
     await service.logout(current_user.current_jti)
-    return ApiResponse(success=True, message="Logged out successfully")
+    return ApiResponse(success=True, message="Logged out successfully", statusCode=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=ApiResponse[UserInfo])
 async def get_me(current_user: CurrentUser, service: AuthServiceDep):
     """Get current authenticated user info."""
     result = await service.get_current_user_info(current_user)
-    return ApiResponse(success=True, data=result)
+    return ApiResponse(success=True, data=result, statusCode=status.HTTP_200_OK)

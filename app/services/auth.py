@@ -2,9 +2,9 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import jwt
 from fastapi import HTTPException, status
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+from pwdlib import PasswordHash
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,7 @@ from app.models.user import User
 from app.models.user_token import UserToken
 from app.schemas.auth import RegisterRequest, TokenResponse, UserInfo
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+password_hash = PasswordHash.recommended()
 
 
 class AuthService:
@@ -93,11 +93,11 @@ class AuthService:
 
     @staticmethod
     def hash_password(password: str) -> str:
-        return pwd_context.hash(password)
+        return password_hash.hash(password)
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        return pwd_context.verify(plain_password, hashed_password)
+        return password_hash.verify(plain_password, hashed_password)
 
     @staticmethod
     def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
@@ -117,7 +117,7 @@ class AuthService:
                 token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
             )
             return payload
-        except JWTError:
+        except jwt.InvalidTokenError:
             return None
 
     # ------------------------------------------------------------------
@@ -135,14 +135,34 @@ class AuthService:
             expires_delta=expires_delta,
         )
 
+        await self._update_token(user_id, jti, expires_at)
+
+        return token
+    
+    async def _update_token(self, user_id: uuid.UUID, jti: str, expires_at: datetime) -> None:
+        """
+            One user will have only one token at a time.
+            So, delete any existing tokens for the user before issuing a new one.
+            Then, insert the new token.
+        """
+        await self._revoke_existing_tokens(user_id)
+        await self._create_token(user_id, jti, expires_at)
+    
+    async def _create_token(self, user_id: uuid.UUID, jti: str, expires_at: datetime) -> None:
         self.db.add(UserToken(
             user_id=user_id,
             jti=jti,
             expires_at=expires_at,
         ))
+
         await self.db.flush()
 
-        return token
+
+    async def _revoke_existing_tokens(self, user_id: uuid.UUID) -> None:
+        await self.db.execute(
+            delete(UserToken).where(UserToken.user_id == user_id)
+        )
+        await self.db.flush()
 
     async def _check_email_available(self, email: str) -> None:
         result = await self.db.execute(select(User).where(User.email == email))
@@ -204,7 +224,7 @@ class AuthService:
         )
         user = result.scalar_one_or_none()
 
-        if not user or not self.verify_password(password, user.hashed_password):
+        if not user or not self.verify_password(password, user.password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
