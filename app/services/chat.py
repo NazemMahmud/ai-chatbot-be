@@ -8,11 +8,12 @@ import uuid
 
 import httpx
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.enums.chat import MessageRole
+from app.enums.document import DocumentStatus
 from app.models import Bot, Conversation, Document, DocumentBot, DocumentChunk, Message
 from app.schemas.chat import ChatResponse, SourceChunk
 from app.services.embedding import EmbeddingService
@@ -55,7 +56,8 @@ class ChatService:
         )
 
         # 3. Retrieve relevant chunks
-        chunks = await self.retrieve_chunks(message, bot_id)
+        chunks = await self.retrieve_chunks(message, organization_id, bot_id)
+        logger.info(f"[CHAT] Got {len(chunks)} chunks for bot={bot_id}, org={organization_id}")
 
         # 4. Build prompt
         history = await self._get_history(conversation.id, limit=10)
@@ -94,38 +96,115 @@ class ChatService:
     # RAG: Retrieve chunks
     # ------------------------------------------------------------------
 
+    # Context budget for chunks.
+    # phi4 has 16K tokens (~64K chars). Reserve space for:
+    #   - System prompt + instructions: ~1K tokens (~4K chars)
+    #   - Conversation history (up to 10 msgs): ~2K tokens (~8K chars)
+    #   - LLM response: ~1K tokens (~4K chars)
+    # Available for chunks: ~12K tokens = ~48K chars.
+    # But LLMs lose attention in very long contexts ("lost in the middle"),
+    # so cap at ~30K chars (~30 chunks) for better accuracy.
+    MAX_CONTEXT_CHARS = 30000
+
     async def retrieve_chunks(
-        self, query: str, bot_id: uuid.UUID, top_k: int = 5
+        self, query: str, organization_id: uuid.UUID, bot_id: uuid.UUID | None = None,
     ) -> list[DocumentChunk]:
         """
-        Embed query and find top_k similar chunks from documents
-        linked to this bot via pgvector cosine similarity.
+        Smart retrieval with bot-scoped access:
+        - If bot has linked documents → use only those
+        - If bot has NO linked documents → fallback to all org documents
+        Then pick chunks by cosine similarity within context budget.
         """
+        logger.info(f"[RAG] retrieve_chunks called for org={organization_id}, bot={bot_id}")
+
         try:
             query_embedding = await self.embedding_service.embed(query)
+            logger.info(f"[RAG] Query embedded OK, vector length={len(query_embedding)}")
         except Exception as e:
-            logger.error(f"Embedding failed: {e}")
+            logger.error(f"[RAG] Embedding FAILED: {e}")
             return []
 
-        # Get document IDs linked to this bot
-        doc_ids_result = await self.db.execute(
-            select(DocumentBot.document_id).where(DocumentBot.bot_id == bot_id)
-        )
-        doc_ids = [row[0] for row in doc_ids_result.all()]
+        # Determine which documents to search
+        doc_ids = []
+
+        # Check if bot has linked documents
+        if bot_id:
+            linked_result = await self.db.execute(
+                select(DocumentBot.document_id).where(DocumentBot.bot_id == bot_id)
+            )
+            linked_doc_ids = [row[0] for row in linked_result.all()]
+
+            if linked_doc_ids:
+                # Bot has linked docs → filter to only READY ones
+                doc_ids_result = await self.db.execute(
+                    select(Document.id).where(
+                        Document.id.in_(linked_doc_ids),
+                        Document.organization_id == organization_id,
+                        Document.status == DocumentStatus.READY,
+                    )
+                )
+                doc_ids = [row[0] for row in doc_ids_result.all()]
+                logger.info(f"[RAG] Bot has {len(linked_doc_ids)} linked docs, {len(doc_ids)} ready")
+
+        # Fallback: no bot_id or bot has no linked docs → use all org docs
+        if not doc_ids:
+            doc_ids_result = await self.db.execute(
+                select(Document.id).where(
+                    Document.organization_id == organization_id,
+                    Document.status == DocumentStatus.READY,
+                )
+            )
+            doc_ids = [row[0] for row in doc_ids_result.all()]
+            logger.info(f"[RAG] Fallback to all org docs: {len(doc_ids)} ready documents")
 
         if not doc_ids:
+            logger.warning(f"[RAG] No ready documents found for org {organization_id}")
             return []
 
-        # Cosine similarity search on pgvector
-        stmt = (
-            select(DocumentChunk)
-            .where(DocumentChunk.document_id.in_(doc_ids))
-            .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
+        # Count total chunks
+        count_result = await self.db.execute(
+            select(func.count(DocumentChunk.id)).where(
+                DocumentChunk.document_id.in_(doc_ids)
+            )
         )
+        total_chunks = count_result.scalar() or 0
+        max_chunks = self.MAX_CONTEXT_CHARS // settings.CHUNK_SIZE
+        logger.info(f"[RAG] total_chunks={total_chunks}, max_chunks={max_chunks}")
 
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())
+        if total_chunks <= max_chunks:
+            # Small dataset: send ALL chunks ordered by relevance
+            stmt = (
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id.in_(doc_ids))
+                .order_by(
+                    DocumentChunk.embedding.cosine_distance(query_embedding)
+                )
+            )
+            logger.info(f"[RAG] Small dataset ({total_chunks} chunks) — sending all")
+        else:
+            # Large dataset: pick most relevant subset
+            stmt = (
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id.in_(doc_ids))
+                .order_by(
+                    DocumentChunk.embedding.cosine_distance(query_embedding)
+                )
+                .limit(max_chunks)
+            )
+            logger.info(
+                f"[RAG] Large dataset ({total_chunks} chunks) — sending top {max_chunks}"
+            )
+
+        try:
+            result = await self.db.execute(stmt)
+            chunks = list(result.scalars().all())
+            logger.info(f"[RAG] Retrieved {len(chunks)} chunks from DB")
+            if chunks:
+                logger.info(f"[RAG] First chunk preview: {chunks[0].content[:100]}...")
+            return chunks
+        except Exception as e:
+            logger.error(f"[RAG] Chunk query FAILED: {e}")
+            return []
 
     # ------------------------------------------------------------------
     # RAG: Build prompt
@@ -139,27 +218,38 @@ class ChatService:
         user_message: str,
     ) -> list[dict]:
         """Build the message list for the LLM."""
-        messages = [{"role": "system", "content": system_prompt}]
-
-        # Add context from retrieved chunks
         if context_chunks:
             context_text = "\n\n".join(
-                f"[{i+1}] {chunk.content}" for i, chunk in enumerate(context_chunks)
+                f"[Source {i+1}] {chunk.content}"
+                for i, chunk in enumerate(context_chunks)
             )
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Use the following context to answer the user's question. "
-                        "If the context doesn't contain relevant information, say so.\n\n"
-                        f"Context:\n{context_text}"
-                    ),
-                }
+            full_system = (
+                f"{system_prompt}\n\n"
+                "## INSTRUCTIONS\n"
+                "1. Answer using ONLY the document context below.\n"
+                "2. Read EVERY source carefully from start to end before answering.\n"
+                "3. Be COMPLETE — include ALL matching items from ALL sources. "
+                "Do NOT stop early or skip any source.\n"
+                "4. If asked whether something exists, search ALL sources "
+                "before saying it does not exist.\n"
+                "5. Be CONCISE — answer directly without unnecessary elaboration.\n\n"
+                f"## DOCUMENT CONTEXT\n{context_text}"
+            )
+        else:
+            full_system = (
+                f"{system_prompt}\n\n"
+                "No document context is available. Let the user know that no relevant "
+                "documents were found and answer based on general knowledge if possible."
             )
 
-        # Add conversation history
+        messages = [{"role": "system", "content": full_system}]
+
+        # Add conversation history (trim long messages to save context budget)
         for msg in history:
-            messages.append({"role": msg.role, "content": msg.content})
+            content = msg.content
+            if len(content) > 500:
+                content = content[:500] + "..."
+            messages.append({"role": msg.role, "content": content})
 
         # Add the current user message
         messages.append({"role": "user", "content": user_message})

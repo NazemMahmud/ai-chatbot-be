@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # LLM_MAX_TOKENS: int = 1024
     LLM_SYSTEM_PROMPT: str = "You are a helpful AI assistant. Answer questions based on the provided context."
 
+    # Separate smaller/faster model for document summary extraction during processing.
+    # Uses OLLAMA_LLM_MODEL if not set.
+    OLLAMA_SUMMARY_MODEL: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

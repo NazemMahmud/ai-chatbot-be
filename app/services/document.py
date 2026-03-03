@@ -4,9 +4,11 @@ Document Service - High-level document operations
 Coordinates storage, parsing, chunking, and embedding services.
 Used by both API endpoints and background workers.
 """
+import logging
 import uuid
 from typing import Optional
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,8 @@ from app.enums import DocumentParserType, DocumentSourceType, DocumentStatus
 from app.models import Bot, Document, DocumentBot, DocumentChunk
 from app.schemas.document import DocumentListData
 from app.services.storage import get_storage_service
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentService:
@@ -166,6 +170,136 @@ class DocumentService:
             document.error_message = str(e)[:1000]
             await self.db.commit()
             raise
+
+    # ------------------------------------------------------------------
+    # SUMMARY EXTRACTION
+    # ------------------------------------------------------------------
+
+    SUMMARY_PROMPT = (
+        "Extract ALL key information from the text below. "
+        "Be exhaustive and complete.\n\n"
+        "Provide the following sections:\n"
+        "## Names / Entities\n"
+        "List EVERY person, company, product, service, or named entity.\n\n"
+        "## Key Terms / Definitions\n"
+        "List important terms, acronyms, or definitions.\n\n"
+        "## Key Facts / Data Points\n"
+        "List important facts, numbers, dates, rules, policies, "
+        "questions and answers, or procedures.\n\n"
+        "## Summary\n"
+        "A brief overview of what this content is about.\n\n"
+        "Be thorough. Include EVERY name and detail, even minor ones. "
+        "Only include sections that have content.\n\n"
+        "TEXT:\n{text}"
+    )
+
+    async def _generate_summary_chunk(
+        self,
+        document_id: uuid.UUID,
+        chunk_contents: list[str],
+        embedding_service,
+    ) -> None:
+        """
+        Use the LLM to extract key entities from the document and store
+        as a special summary chunk. This chunk gets priority in RAG retrieval.
+        """
+        try:
+            # Combine chunks into batches that fit LLM context.
+            # Process in batches of ~10K chars (~2500 tokens) to stay safe.
+            batch_size_chars = 10000
+            summaries = []
+
+            current_batch = ""
+            for content in chunk_contents:
+                if len(current_batch) + len(content) > batch_size_chars:
+                    # Process this batch
+                    summary = await self._extract_summary(current_batch)
+                    if summary:
+                        summaries.append(summary)
+                    current_batch = content
+                else:
+                    current_batch += "\n\n" + content
+
+            # Process the last batch
+            if current_batch.strip():
+                summary = await self._extract_summary(current_batch)
+                if summary:
+                    summaries.append(summary)
+
+            if not summaries:
+                logger.warning(f"No summaries generated for document {document_id}")
+                return
+
+            # If multiple batch summaries, merge them into one final summary
+            if len(summaries) > 1:
+                merged_text = "\n\n".join(summaries)
+                final_summary = await self._extract_summary(
+                    merged_text,
+                    prompt_override=(
+                        "You are a document analyst. Below are partial summaries "
+                        "extracted from different sections of a document. Merge them "
+                        "into ONE comprehensive summary. Remove duplicates but keep "
+                        "ALL unique names, places, topics, and facts.\n\n"
+                        "PARTIAL SUMMARIES:\n{text}"
+                    ),
+                )
+            else:
+                final_summary = summaries[0]
+
+            if not final_summary:
+                return
+
+            # Embed and save as a special summary chunk
+            summary_embedding = await embedding_service.embed(final_summary)
+
+            summary_chunk = DocumentChunk(
+                document_id=document_id,
+                content=final_summary,
+                metadata_={"is_summary": True, "chunk_index": -1},
+                embedding=summary_embedding,
+            )
+            self.db.add(summary_chunk)
+            await self.db.flush()
+
+            logger.info(
+                f"Summary chunk created for document {document_id} "
+                f"({len(final_summary)} chars)"
+            )
+
+        except Exception as e:
+            # Summary is a bonus — don't fail the whole pipeline
+            logger.error(f"Summary generation failed for {document_id}: {e}")
+
+    async def _extract_summary(
+        self, text: str, prompt_override: str | None = None
+    ) -> str | None:
+        """Call Ollama LLM to extract summary from text."""
+        prompt = (prompt_override or self.SUMMARY_PROMPT).format(text=text)
+
+        # Use a dedicated summary model if configured, otherwise fall back
+        # to the chat LLM. Set OLLAMA_SUMMARY_MODEL=phi4-mini in .env
+        # for faster processing while keeping phi4 for chat.
+        model = settings.OLLAMA_SUMMARY_MODEL or settings.OLLAMA_LLM_MODEL
+
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    f"{settings.OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": "You extract key information from any given content."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "stream": False,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data.get("message", {}).get("content", "")
+        except Exception as e:
+            logger.error(f"Summary extraction LLM call failed: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # READ
