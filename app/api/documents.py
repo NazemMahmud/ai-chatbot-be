@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, status
 
-from app.api.deps import DBSession
+from app.api.deps import CurrentUser, DBSession
 from app.enums import DocumentStatus
 from app.schemas import (
     ApiResponse,
@@ -29,9 +29,10 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 )
 async def upload_document(
     db: DBSession,
+    current_user: CurrentUser,
     data_file: UploadFile = File(..., description="The document file to upload"),
     bot_ids: Optional[str] = Form(None, description="JSON array of bot UUIDs (optional)"),
-    parser_type: str = Form(..., description="Parser type: 'simple' or 'docling'"),
+    parser_type: str = Form(..., description="Parser type: 'simple' or 'advanced'"),
 ):
     """
     Upload a document for processing.
@@ -40,7 +41,6 @@ async def upload_document(
     """
     file_content = await data_file.read()
 
-    # Validate file + form fields (all rules live in the schema)
     upload_req = DocumentUploadRequest(
         file_name=data_file.filename or "",
         file_content_type=(data_file.content_type or "").strip().lower(),
@@ -54,6 +54,7 @@ async def upload_document(
         name=upload_req.file_name,
         file_content=file_content,
         mime_type=upload_req.file_content_type,
+        organization_id=current_user.organization_id,
         parser_type=upload_req.parser_type,
         bot_ids=upload_req.bot_ids,
     )
@@ -70,6 +71,7 @@ async def upload_document(
 @router.get("", response_model=ApiResponse[DocumentListData])
 async def list_documents(
     db: DBSession,
+    current_user: CurrentUser,
     bot_id: Optional[uuid.UUID] = Query(None, description="Filter by bot ID"),
     doc_status: Optional[DocumentStatus] = Query(
         None, alias="status", description="Filter by status"
@@ -79,7 +81,9 @@ async def list_documents(
 ):
     """List documents. Optionally filter by bot_id and/or status."""
     service = DocumentService(db)
-    result = await service.list_documents(bot_id, doc_status, limit, offset)
+    result = await service.list_documents(
+        current_user.organization_id, bot_id, doc_status, limit, offset
+    )
     return ApiResponse(success=True, data=result)
 
 
@@ -87,6 +91,7 @@ async def list_documents(
 async def get_document_status(
     document_id: uuid.UUID,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     """
     Get the processing status of a document.
@@ -98,7 +103,7 @@ async def get_document_status(
     - failed: Processing failed, check error_message
     """
     service = DocumentService(db)
-    document = await service.get_document(document_id)
+    document = await service.get_document(document_id, current_user.organization_id)
     return ApiResponse(success=True, data=document)
 
 
@@ -106,10 +111,11 @@ async def get_document_status(
 async def get_document(
     document_id: uuid.UUID,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     """Get full document details."""
     service = DocumentService(db)
-    document = await service.get_document(document_id)
+    document = await service.get_document(document_id, current_user.organization_id)
     return ApiResponse(success=True, data=document)
 
 
@@ -117,8 +123,9 @@ async def get_document(
 async def delete_document(
     document_id: uuid.UUID,
     db: DBSession,
+    current_user: CurrentUser,
 ):
     """Delete a document and all its chunks."""
     service = DocumentService(db)
-    await service.delete_document(document_id)
+    await service.delete_document(document_id, current_user.organization_id)
     return ApiResponse(success=True, message="Document deleted successfully")

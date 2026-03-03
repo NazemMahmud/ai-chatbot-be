@@ -6,7 +6,6 @@ class Settings(BaseSettings):
     APP_NAME: str = "AI-Chatbot"
     APP_ENV: str = "development"
     DEBUG: bool = True
-    SECRET_KEY: str = "change-me-to-a-random-string-min-32-chars"
     API_URL: str = "http://localhost:8000"
 
     # Database
@@ -45,10 +44,19 @@ class Settings(BaseSettings):
     WORKER_MAX_JOBS: int = 10
     WORKER_JOB_TIMEOUT: int = 3600  # 1 hour max per job
 
+    # JWT
+    JWT_SECRET: str = "change-me-to-a-random-string-min-32-chars"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+
     # LLM Chat-bot Settings (used globally, not per-bot)
     # LLM_TEMPERATURE: float = 0.7
     # LLM_MAX_TOKENS: int = 1024
     LLM_SYSTEM_PROMPT: str = "You are a helpful AI assistant. Answer questions based on the provided context."
+
+    # Separate smaller/faster model for document summary extraction during processing.
+    # Uses OLLAMA_LLM_MODEL if not set.
+    OLLAMA_SUMMARY_MODEL: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

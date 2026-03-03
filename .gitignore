@@ -45,8 +45,14 @@ alembic/versions/__pycache__/
 # Uploads (local dev)
 uploads/
 
-# Models (if downloaded locally)
-models/
+# Storage (logs etc.) — keep folders, ignore contents
+storage/**
+!storage/.gitkeep
+!storage/logs/
+storage/logs/**
+!storage/logs/.gitkeep
+
+# Md files
 *.md
 **/*.md
 !README.md

@@ -12,6 +12,9 @@ from app.database import Base
 
 # Import all models so Alembic can detect them
 from app.models import (  # noqa: F401
+    User,
+    UserToken,
+    Organization,
     Bot,
     Document,
     DocumentBot,
