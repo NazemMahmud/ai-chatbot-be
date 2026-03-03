@@ -30,10 +30,11 @@ python-docx==1.2.0
 # Document Parsing - Docling Mode (optional, heavy)
 
 
-# Text Processing
+# RAG Pipeline - Reranker (cross-encoder, ~80MB model, CPU-only)
+sentence-transformers>=3.0.0
 
-
-# Embeddings
+# RAG Pipeline - Entity Extraction (NER, ~15MB model, CPU-only)
+spacy>=3.7.0
 
 # Auth
 PyJWT==2.11.0

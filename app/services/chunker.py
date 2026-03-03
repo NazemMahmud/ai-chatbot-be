@@ -2,12 +2,16 @@
 Chunker Service - Splits text into chunks for embedding
 
 Custom sentence-aware recursive splitter. No external dependencies.
-Matches APPROACH_GUIDE.md Step 5: sentence-aware splitting with configurable
-chunk size and overlap.
+Supports page-level metadata propagation for citation accuracy.
 """
-from typing import List
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.services.parser import ParsedPage
 
 
 class ChunkerService:
@@ -148,3 +152,74 @@ class ChunkerService:
         for chunk in chunks:
             chunk["metadata"]["source"] = source_name
         return chunks
+
+    def chunk_pages(
+        self, pages: list["ParsedPage"], source_name: str
+    ) -> List[dict]:
+        """
+        Split page-level text into chunks, preserving page numbers.
+
+        Each chunk knows which page(s) it came from, enabling accurate
+        citations like "Source 3, Page 5".
+
+        Args:
+            pages: List of ParsedPage(text, page_number)
+            source_name: Document name
+
+        Returns:
+            List of chunks with page metadata
+        """
+        if not pages:
+            return []
+
+        # Build a list of (char_offset, page_number) markers
+        # so we can map any position in the full text back to a page.
+        page_markers: list[tuple[int, int | None]] = []
+        full_parts: list[str] = []
+        offset = 0
+        for page in pages:
+            if not page.text.strip():
+                continue
+            page_markers.append((offset, page.page_number))
+            full_parts.append(page.text)
+            offset += len(page.text) + 2  # +2 for "\n\n" join separator
+
+        full_text = "\n\n".join(full_parts)
+        if not full_text.strip():
+            return []
+
+        # Split into chunks
+        raw_chunks = self._split_text_recursive(full_text)
+
+        # Map each chunk back to page number(s)
+        results: list[dict] = []
+        search_start = 0
+
+        for i, chunk_text in enumerate(raw_chunks):
+            # Find where this chunk starts in the full text
+            pos = full_text.find(chunk_text, search_start)
+            if pos == -1:
+                pos = full_text.find(chunk_text)  # fallback: search from start
+            if pos >= 0:
+                search_start = pos + 1
+
+            # Determine page number from position
+            page_num = None
+            if pos >= 0 and page_markers:
+                for marker_offset, marker_page in reversed(page_markers):
+                    if pos >= marker_offset:
+                        page_num = marker_page
+                        break
+
+            results.append({
+                "content": chunk_text,
+                "metadata": {
+                    "chunk_index": i,
+                    "chunk_size": len(chunk_text),
+                    "total_chunks": len(raw_chunks),
+                    "source": source_name,
+                    "page_number": page_num,
+                },
+            })
+
+        return results
