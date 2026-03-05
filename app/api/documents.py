@@ -1,12 +1,15 @@
 """
 Documents API - Upload and manage documents for bot training
+
+Route convention: dynamic path values are always at the end of the URL.
 """
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, status
 
 from app.api.deps import CurrentUser, DBSession
+from app.services.permissions import PermissionService
 from app.enums import DocumentStatus
 from app.schemas import (
     ApiResponse,
@@ -15,7 +18,7 @@ from app.schemas import (
     DocumentStatusData,
     DocumentListData,
 )
-from app.schemas.document import DocumentUploadRequest
+from app.schemas.document import DocumentUploadRequest, DocumentUpdateBotsRequest
 from app.services import DocumentService
 from app.services import QueueService
 
@@ -26,18 +29,19 @@ router = APIRouter(prefix="/documents", tags=["documents"])
     "/upload",
     response_model=ApiResponse[DocumentUploadData],
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(PermissionService.Documents.UPLOAD)],
 )
 async def upload_document(
     db: DBSession,
     current_user: CurrentUser,
     data_file: UploadFile = File(..., description="The document file to upload"),
-    bot_ids: Optional[str] = Form(None, description="JSON array of bot UUIDs (optional)"),
-    parser_type: str = Form(..., description="Parser type: 'simple' or 'advanced'"),
+    bot_ids: str = Form(..., description="JSON array of bot UUIDs (required, at least one)"),
 ):
     """
     Upload a document for processing.
     The document will be queued for async processing (parse -> chunk -> embed).
-    Use GET /documents/{id}/status to check processing status.
+    Parser type is auto-detected from the file's MIME type.
+    Use GET /documents/status/{id} to check processing status.
     """
     file_content = await data_file.read()
 
@@ -46,7 +50,6 @@ async def upload_document(
         file_content_type=(data_file.content_type or "").strip().lower(),
         file_size=len(file_content),
         bot_ids=bot_ids,
-        parser_type=parser_type,
     )
 
     service = DocumentService(db)
@@ -55,7 +58,6 @@ async def upload_document(
         file_content=file_content,
         mime_type=upload_req.file_content_type,
         organization_id=current_user.organization_id,
-        parser_type=upload_req.parser_type,
         bot_ids=upload_req.bot_ids,
     )
 
@@ -68,7 +70,11 @@ async def upload_document(
     )
 
 
-@router.get("", response_model=ApiResponse[DocumentListData])
+@router.get(
+    "",
+    response_model=ApiResponse[DocumentListData],
+    dependencies=[Depends(PermissionService.Documents.READ)],
+)
 async def list_documents(
     db: DBSession,
     current_user: CurrentUser,
@@ -87,7 +93,11 @@ async def list_documents(
     return ApiResponse(success=True, data=result)
 
 
-@router.get("/{document_id}/status", response_model=ApiResponse[DocumentStatusData])
+@router.get(
+    "/status/{document_id}",
+    response_model=ApiResponse[DocumentStatusData],
+    dependencies=[Depends(PermissionService.Documents.READ)],
+)
 async def get_document_status(
     document_id: uuid.UUID,
     db: DBSession,
@@ -107,7 +117,11 @@ async def get_document_status(
     return ApiResponse(success=True, data=document)
 
 
-@router.get("/{document_id}/detail", response_model=ApiResponse[DocumentResponse])
+@router.get(
+    "/detail/{document_id}",
+    response_model=ApiResponse[DocumentResponse],
+    dependencies=[Depends(PermissionService.Documents.READ)],
+)
 async def get_document(
     document_id: uuid.UUID,
     db: DBSession,
@@ -119,7 +133,34 @@ async def get_document(
     return ApiResponse(success=True, data=document)
 
 
-@router.delete("/{document_id}", response_model=ApiResponse[None])
+@router.patch(
+    "/bots/{document_id}",
+    response_model=ApiResponse[DocumentResponse],
+    dependencies=[Depends(PermissionService.Documents.UPDATE)],
+)
+async def update_document_bots(
+    data: DocumentUpdateBotsRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+    document_id: uuid.UUID = Path(..., description="The unique ID of the document")
+):
+    """Update bot associations for a document. REPLACES existing associations."""
+    service = DocumentService(db)
+    document = await service.update_document_bots(
+        document_id, current_user.organization_id, data.bot_ids
+    )
+    return ApiResponse(
+        success=True,
+        message="Document bot associations updated successfully",
+        data=document,
+    )
+
+
+@router.delete(
+    "/{document_id}",
+    response_model=ApiResponse[None],
+    dependencies=[Depends(PermissionService.Documents.DELETE)],
+)
 async def delete_document(
     document_id: uuid.UUID,
     db: DBSession,

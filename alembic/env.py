@@ -16,9 +16,18 @@ from app.models import (  # noqa: F401
     UserToken,
     Organization,
     Bot,
+    BotChannel,
     Document,
     DocumentBot,
     DocumentChunk,
+    Conversation,
+    Message,
+    Permission,
+    Role,
+    RolePermission,
+    OrgMember,
+    OrgInvitation,
+    OwnershipTransfer,
 )
 
 

@@ -1,10 +1,11 @@
 """
 Auth API - Registration, login, logout, and current user info
 """
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Response, status
 
 from app.api.deps import AuthServiceDep, CurrentUser
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserInfo
+from app.services.auth import AuthService
 from app.schemas.common import ApiResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -22,21 +23,23 @@ async def register(data: RegisterRequest, service: AuthServiceDep):
 
 
 @router.post("/signin", response_model=ApiResponse[TokenResponse])
-async def login(data: LoginRequest, service: AuthServiceDep):
+async def login(data: LoginRequest, response: Response, service: AuthServiceDep):
     """Login with email and password."""
     result = await service.login(data.email, data.password)
+    AuthService.set_token_cookie(response, result.access_token)
     return ApiResponse(success=True, message="Login successful", data=result, statusCode=status.HTTP_200_OK)
 
 
 @router.post("/logout", response_model=ApiResponse[None])
-async def logout(current_user: CurrentUser, service: AuthServiceDep):
+async def logout(current_user: CurrentUser, response: Response, service: AuthServiceDep):
     """Logout and invalidate the current token."""
     await service.logout(current_user.current_jti)
+    AuthService.clear_token_cookie(response)
     return ApiResponse(success=True, message="Logged out successfully", statusCode=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=ApiResponse[UserInfo])
 async def get_me(current_user: CurrentUser, service: AuthServiceDep):
-    """Get current authenticated user info."""
+    """Get current authenticated user info with role and permissions."""
     result = await service.get_current_user_info(current_user)
     return ApiResponse(success=True, data=result, statusCode=status.HTTP_200_OK)

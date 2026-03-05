@@ -4,9 +4,10 @@ Chat API - RAG chat, conversation listing, and message history
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import CurrentUser, DBSession
+from app.services.permissions import PermissionService
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -21,7 +22,11 @@ from app.services.chat import ChatService
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-@router.post("", response_model=ApiResponse[ChatResponse])
+@router.post(
+    "",
+    response_model=ApiResponse[ChatResponse],
+    dependencies=[Depends(PermissionService.Chat.SEND)],
+)
 async def send_message(
     data: ChatRequest,
     db: DBSession,
@@ -43,7 +48,11 @@ async def send_message(
     )
 
 
-@router.get("/conversations", response_model=ApiResponse[ConversationListData])
+@router.get(
+    "/conversations",
+    response_model=ApiResponse[ConversationListData],
+    dependencies=[Depends(PermissionService.Chat.READ)],
+)
 async def list_conversations(
     db: DBSession,
     current_user: CurrentUser,
@@ -84,6 +93,7 @@ async def list_conversations(
 @router.get(
     "/conversations/{session_id}/messages",
     response_model=ApiResponse[list[MessageResponse]],
+    dependencies=[Depends(PermissionService.Chat.READ)],
 )
 async def get_conversation_messages(
     session_id: str,

@@ -3,12 +3,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Response, status
 from pwdlib import PasswordHash
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.user_token import UserToken
@@ -26,38 +27,20 @@ class AuthService:
     # ------------------------------------------------------------------
 
     async def register(self, data: RegisterRequest) -> None:
+        """Register a new user. Organization is created separately after login."""
         await self._check_email_available(data.email)
 
-        user = await self._create_user(
+        await self._create_user(
             email=data.email,
             password=data.password,
             full_name=data.full_name,
         )
 
-        org = await self._create_organization(
-            name=data.organization_name,
-            owner_id=user.id,
-        )
-
-        user.organization_id = org.id
-        await self.db.flush()
-
     async def login(self, email: str, password: str) -> TokenResponse:
-        user = await self._authenticate_user(email, password)
-
-        org = await self._get_organization(user.organization_id)
-
-        token = await self._issue_token(user.id)
-
-        return TokenResponse(
-            access_token=token,
-            user=UserInfo(
-                id=user.id,
-                email=user.email,
-                full_name=user.full_name,
-                organization_name=org.name if org else None,
-            ),
-        )
+        user      = await self._authenticate_user(email, password)
+        token     = await self._issue_token(user.id)
+        user_info = await self._build_user_info(user)
+        return TokenResponse(access_token=token, user=user_info)
 
     async def logout(self, jti: str) -> None:
         await self.db.execute(
@@ -66,7 +49,29 @@ class AuthService:
         await self.db.flush()
 
     async def get_current_user_info(self, user: User) -> UserInfo:
+        return await self._build_user_info(user)
+
+    async def _build_user_info(self, user: User) -> UserInfo:
+        """Build UserInfo including role and permissions from org membership."""
         org = await self._get_organization(user.organization_id)
+
+        role_id: uuid.UUID | None = None
+        role_name: str | None = None
+        permissions: list[str] = []
+
+        if user.organization_id:
+            result = await self.db.execute(
+                select(OrgMember).where(
+                    OrgMember.user_id == user.id,
+                    OrgMember.organization_id == user.organization_id,
+                    OrgMember.deleted_at.is_(None),
+                )
+            )
+            member = result.scalar_one_or_none()
+            if member and member.role:
+                role_id     = member.role_id
+                role_name   = member.role.name
+                permissions = [p.code for p in member.role.permissions]
 
         return UserInfo(
             id=user.id,
@@ -74,6 +79,10 @@ class AuthService:
             full_name=user.full_name,
             organization_id=user.organization_id,
             organization_name=org.name if org else None,
+            has_organization=org is not None,
+            role_id=role_id,
+            role_name=role_name,
+            permissions=permissions,
         )
 
     # ------------------------------------------------------------------
@@ -138,7 +147,7 @@ class AuthService:
         await self._update_token(user_id, jti, expires_at)
 
         return token
-    
+
     async def _update_token(self, user_id: uuid.UUID, jti: str, expires_at: datetime) -> None:
         """
             One user will have only one token at a time.
@@ -147,7 +156,7 @@ class AuthService:
         """
         await self._revoke_existing_tokens(user_id)
         await self._create_token(user_id, jti, expires_at)
-    
+
     async def _create_token(self, user_id: uuid.UUID, jti: str, expires_at: datetime) -> None:
         self.db.add(UserToken(
             user_id=user_id,
@@ -165,7 +174,9 @@ class AuthService:
         await self.db.flush()
 
     async def _check_email_available(self, email: str) -> None:
-        result = await self.db.execute(select(User).where(User.email == email))
+        result = await self.db.execute(
+            select(User).where(User.email == email, User.deleted_at.is_(None))
+        )
         if result.scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -185,42 +196,13 @@ class AuthService:
         await self.db.flush()
         return user
 
-    async def _create_organization(self, name: str, owner_id) -> Organization:
-        slug = await self._generate_unique_slug(name)
-
-        org = Organization(
-            name=name,
-            slug=slug,
-            owner_id=owner_id,
-        )
-        self.db.add(org)
-        await self.db.flush()
-        return org
-
-    async def _generate_unique_slug(self, name: str) -> str:
-        base_slug = self._slugify(name)
-        slug = base_slug
-        counter = 1
-        while True:
-            result = await self.db.execute(
-                select(Organization).where(Organization.slug == slug)
-            )
-            if not result.scalar_one_or_none():
-                return slug
-            slug = f"{base_slug}-{counter}"
-            counter += 1
-
-    @staticmethod
-    def _slugify(name: str) -> str:
-        slug = name.lower().strip()
-        slug = re.sub(r"[^a-z0-9\s-]", "", slug)
-        slug = re.sub(r"[\s-]+", "-", slug)
-        slug = slug.strip("-")
-        return slug or "org"
-
     async def _authenticate_user(self, email: str, password: str) -> User:
         result = await self.db.execute(
-            select(User).where(User.email == email, User.is_active.is_(True))
+            select(User).where(
+                User.email == email,
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+            )
         )
         user = result.scalar_one_or_none()
 
@@ -236,6 +218,33 @@ class AuthService:
         if not organization_id:
             return None
         result = await self.db.execute(
-            select(Organization).where(Organization.id == organization_id)
+            select(Organization).where(
+                Organization.id == organization_id,
+                Organization.deleted_at.is_(None),
+            )
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    def set_token_cookie(response: Response, token: str) -> None:
+        is_prod = settings.APP_ENV != "development"
+        response.set_cookie(
+            key="access_token",
+            value=token,
+            httponly=True,
+            secure=is_prod,
+            samesite="lax",
+            path="/",
+            max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+
+    @staticmethod
+    def clear_token_cookie(response: Response) -> None:
+        is_prod = settings.APP_ENV != "development"
+        response.delete_cookie(
+            key="access_token",
+            httponly=True,
+            secure=is_prod,
+            samesite="lax",
+            path="/",
+        )
