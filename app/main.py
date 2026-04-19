@@ -5,10 +5,13 @@ from app.logging_config import setup_logging
 
 setup_logging()
 
+import os
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -35,6 +38,23 @@ app.add_middleware(
 # --- Register routers ---
 from app.api import api_router  # noqa: E402
 app.include_router(api_router)
+
+# --- Serve widget JS as a static route ---
+WIDGET_DIR = os.path.join(os.path.dirname(__file__), "static", "widget")
+
+
+@app.get("/widget/chatbot.js")
+async def serve_widget_js():
+    """Serve the embeddable widget JavaScript bundle."""
+    file_path = os.path.join(WIDGET_DIR, "chatbot.js")
+    return FileResponse(
+        file_path,
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @app.exception_handler(StarletteHTTPException)

@@ -4,11 +4,13 @@ Bots API - CRUD operations for chatbots
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import CurrentUser, DBSession
 from app.schemas import ApiResponse, BotCreate, BotUpdate, BotResponse, BotListData
+from app.schemas.bot import BotPickerListData
 from app.services.bot import BotService
+from app.services.permissions import PermissionService
 
 router = APIRouter(prefix="/bots", tags=["bots"])
 
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/bots", tags=["bots"])
     "",
     response_model=ApiResponse[BotResponse],
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(PermissionService.Bots.CREATE)],
 )
 async def create_bot(
     data: BotCreate,
@@ -29,7 +32,11 @@ async def create_bot(
     return ApiResponse(success=True, message="Bot created successfully", data=bot, statusCode=status.HTTP_201_CREATED)
 
 
-@router.get("", response_model=ApiResponse[BotListData])
+@router.get(
+    "",
+    response_model=ApiResponse[BotListData],
+    dependencies=[Depends(PermissionService.Bots.READ)],
+)
 async def list_bots(
     db: DBSession,
     current_user: CurrentUser,
@@ -45,7 +52,34 @@ async def list_bots(
     return ApiResponse(success=True, data=result, statusCode=status.HTTP_200_OK)
 
 
-@router.get("/{bot_id}", response_model=ApiResponse[BotResponse])
+@router.get(
+    "/picker",
+    response_model=ApiResponse[BotPickerListData],
+    dependencies=[Depends(PermissionService.Bots.READ)],
+)
+async def bot_picker(
+    db: DBSession,
+    current_user: CurrentUser,
+    search: Optional[str] = Query(None, description="Search by bot name (case-insensitive)"),
+):
+    """
+    Lightweight bot list for picker/select components (e.g. documents page).
+
+    Returns only id + name of active bots. Supports search by name.
+    Default limit is 20, configurable based on subscription package later.
+    """
+    service = BotService(db)
+    result = await service.search_bots_for_picker(
+        current_user.organization_id, search
+    )
+    return ApiResponse(success=True, data=result, statusCode=status.HTTP_200_OK)
+
+
+@router.get(
+    "/{bot_id}",
+    response_model=ApiResponse[BotResponse],
+    dependencies=[Depends(PermissionService.Bots.READ)],
+)
 async def get_bot(
     bot_id: uuid.UUID,
     db: DBSession,
@@ -57,7 +91,11 @@ async def get_bot(
     return ApiResponse(success=True, data=bot, statusCode=status.HTTP_200_OK)
 
 
-@router.patch("/{bot_id}", response_model=ApiResponse[BotResponse])
+@router.patch(
+    "/{bot_id}",
+    response_model=ApiResponse[BotResponse],
+    dependencies=[Depends(PermissionService.Bots.UPDATE)],
+)
 async def update_bot(
     bot_id: uuid.UUID,
     data: BotUpdate,
@@ -75,7 +113,11 @@ async def update_bot(
     )
 
 
-@router.delete("/{bot_id}", response_model=ApiResponse[None])
+@router.delete(
+    "/{bot_id}",
+    response_model=ApiResponse[None],
+    dependencies=[Depends(PermissionService.Bots.DELETE)],
+)
 async def delete_bot(
     bot_id: uuid.UUID,
     db: DBSession,

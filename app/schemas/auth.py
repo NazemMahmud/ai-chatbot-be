@@ -12,7 +12,6 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     full_name: str
-    organization_name: str
 
     @model_validator(mode="before")
     @classmethod
@@ -21,7 +20,6 @@ class RegisterRequest(BaseModel):
             "email": "Email is required",
             "password": "Password is required",
             "full_name": "Full name is required",
-            "organization_name": "Organization name is required",
         }
         for field, msg in required_fields.items():
             if field not in data:
@@ -33,7 +31,7 @@ class RegisterRequest(BaseModel):
     def validate_email(cls, v):
         if not v or not isinstance(v, str) or not v.strip():
             raise PydanticCustomError("invalid", "Email is required")
-            
+
         v = v.strip().lower()
         if not EMAIL_REGEX.match(v):
             raise PydanticCustomError("invalid", "Invalid email format")
@@ -65,27 +63,13 @@ class RegisterRequest(BaseModel):
     def validate_full_name(cls, v):
         if not v or not isinstance(v, str) or not v.strip():
             raise PydanticCustomError("invalid", "Full name is required")
-        
+
         v = v.strip()
         if len(v) > 255:
             raise PydanticCustomError(
                 "max_length", "Full name must be at most 255 characters"
             )
 
-        return v
-
-    @field_validator("organization_name", mode="before")
-    @classmethod
-    def validate_organization_name(cls, v):
-        if not v or not isinstance(v, str) or not v.strip():
-            raise PydanticCustomError("invalid", "Organization name is required")
-        
-        v = v.strip()
-        if len(v) > 255:
-            raise PydanticCustomError(
-                "max_length", "Organization name must be at most 255 characters"
-            )
-            
         return v
 
 
@@ -107,7 +91,7 @@ class LoginRequest(BaseModel):
     def validate_email(cls, v):
         if not v or not isinstance(v, str) or not v.strip():
             raise PydanticCustomError("invalid", "Email is required")
-            
+
         v = v.strip().lower()
         if not EMAIL_REGEX.match(v):
             raise PydanticCustomError("invalid", "Invalid email format")
@@ -116,7 +100,7 @@ class LoginRequest(BaseModel):
                 "max_length", "Email must be at most 255 characters"
             )
         return v
-    
+
     @field_validator("password", mode="before")
     @classmethod
     def validate_password(cls, v):
@@ -139,7 +123,12 @@ class UserInfo(BaseModel):
     id: uuid.UUID
     email: str
     full_name: str
+    organization_id: uuid.UUID | None = None
     organization_name: str | None = None
+    has_organization: bool = False
+    role_id: uuid.UUID | None = None
+    role_name: str | None = None
+    permissions: list[str] = []
 
     model_config = {"from_attributes": True}
 

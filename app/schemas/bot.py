@@ -5,12 +5,16 @@ from typing import Optional, Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
+from app.schemas.widget import WidgetConfig
+
 
 class BotCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: Optional[str] = None
     welcome_message: Optional[str] = None
+    widget_config: Optional[WidgetConfig] = None
+    allowed_domains: Optional[list[str]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -60,6 +64,8 @@ class BotUpdate(BaseModel):
     system_prompt: Optional[str] = None
     welcome_message: Optional[str] = None
     is_active: Optional[bool] = None
+    widget_config: Optional[WidgetConfig] = None
+    allowed_domains: Optional[list[str]] = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -88,7 +94,7 @@ class BotUpdate(BaseModel):
     def validate_is_active(cls, v):
         if isinstance(v, bool):
             return v
-        
+
         raise PydanticCustomError(
             "bool_type",
             "Is active must be a boolean value"
@@ -102,6 +108,8 @@ class BotResponse(BaseModel):
     system_prompt: str | None
     welcome_message: str | None
     is_active: bool
+    widget_config: WidgetConfig | None = None
+    allowed_domains: list[str] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -109,3 +117,15 @@ class BotResponse(BaseModel):
 class BotListData(BaseModel):
     data: list[BotResponse]
     # total: int
+
+
+class BotPickerItem(BaseModel):
+    """Lightweight bot representation for picker/select components."""
+    id: uuid.UUID
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class BotPickerListData(BaseModel):
+    data: list[BotPickerItem]

@@ -7,9 +7,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.enums.chat import MessageRole
+from app.models.mixins import SoftDeleteMixin
 
 
-class Conversation(Base):
+class Conversation(SoftDeleteMixin, Base):
     __tablename__ = "conversations"
 
     id: Mapped[uuid.UUID] = mapped_column(
