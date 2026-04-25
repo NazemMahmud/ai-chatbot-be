@@ -9,7 +9,7 @@ from sqlalchemy.types import UserDefinedType
 
 from app.config import settings
 from app.database import Base
-from app.enums import DocumentSourceType, DocumentStatus, DocumentParserType
+from app.enums import DocumentSourceType, DocumentStatus, DocumentParserType, DocumentType
 from app.models.mixins import SoftDeleteMixin
 
 
@@ -35,6 +35,9 @@ class Document(SoftDeleteMixin, Base):
     parser_type: Mapped[DocumentParserType | None] = mapped_column(
         String(20)
     )  # 'simple' or 'docling', null = use env default
+    document_type: Mapped[DocumentType] = mapped_column(
+        String(50), default=DocumentType.GENERAL, nullable=False
+    )
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
@@ -62,6 +65,7 @@ class Document(SoftDeleteMixin, Base):
 
     __table_args__ = (
         Index("idx_documents_status", "status"),
+        Index("idx_documents_document_type", "document_type"),
         Index("idx_documents_created", "created_at"),
     )
 

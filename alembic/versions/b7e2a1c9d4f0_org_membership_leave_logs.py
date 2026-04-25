@@ -1,7 +1,7 @@
 """org_membership_leave_logs audit table
 
-Revision ID: b7e2a1c9d4f0
-Revises: f5a3b8c2d1e7
+Revision ID: b7e2a1c9d4f0 ( 9th revision )
+Revises: f5a3b8c2d1e7 ( 8th revision )
 Create Date: 2026-04-08
 
 """

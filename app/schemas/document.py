@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from pydantic_core import PydanticCustomError
 
 from app.config import settings
-from app.enums import DocumentStatus, DocumentParserType, DocumentSourceType
+from app.enums import DocumentStatus, DocumentParserType, DocumentSourceType, DocumentType
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +48,10 @@ class DocumentUploadRequest(BaseModel):
     bot_ids: list[uuid.UUID] = Field(
         ...,
         description="List of bot IDs to associate the document with (required, at least one)",
+    )
+    document_type: DocumentType = Field(
+        default=DocumentType.GENERAL,
+        description="Document type for domain-specific processing (story, ecommerce, law, etc.)",
     )
 
     # ----- File validators -----
@@ -146,6 +150,7 @@ class DocumentUploadData(BaseModel):
     status: DocumentStatus
     mime_type: str | None
     parser_type: DocumentParserType | None
+    document_type: DocumentType = DocumentType.GENERAL
     bot_ids: list[uuid.UUID] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
@@ -163,6 +168,7 @@ class DocumentResponse(BaseModel):
     error_message: str | None
     chunk_count: int
     parser_type: DocumentParserType | None
+    document_type: DocumentType = DocumentType.GENERAL
     created_at: datetime
     updated_at: datetime
 
@@ -175,6 +181,7 @@ class DocumentStatusData(BaseModel):
     status: DocumentStatus
     chunk_count: int
     error_message: str | None
+    document_type: DocumentType = DocumentType.GENERAL
     created_at: datetime
     updated_at: datetime
 
