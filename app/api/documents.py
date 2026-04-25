@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile, sta
 
 from app.api.deps import CurrentUser, DBSession
 from app.services.permissions import PermissionService
-from app.enums import DocumentStatus
+from app.enums import DocumentStatus, DocumentType
 from app.schemas import (
     ApiResponse,
     DocumentUploadData,
@@ -36,6 +36,7 @@ async def upload_document(
     current_user: CurrentUser,
     data_file: UploadFile = File(..., description="The document file to upload"),
     bot_ids: str = Form(..., description="JSON array of bot UUIDs (required, at least one)"),
+    document_type: str = Form(default="general", description="Document type for domain-specific processing (optional, defaults to general)"),
 ):
     """
     Upload a document for processing.
@@ -50,6 +51,7 @@ async def upload_document(
         file_content_type=(data_file.content_type or "").strip().lower(),
         file_size=len(file_content),
         bot_ids=bot_ids,
+        document_type=document_type,
     )
 
     service = DocumentService(db)
@@ -59,6 +61,7 @@ async def upload_document(
         mime_type=upload_req.file_content_type,
         organization_id=current_user.organization_id,
         bot_ids=upload_req.bot_ids,
+        document_type=upload_req.document_type,
     )
 
     await QueueService.enqueue_document_processing(document.id)

@@ -36,7 +36,22 @@ class DocumentParserType(str, Enum):
     DOCLING = "docling" # heavy: handles images, tables, OCR
 
 class DocumentType(str, Enum):
-    """Document domain type for specialized processing."""
+    """
+    Document domain type for specialized processing.
+
+    IMPORTANT: KEEP IN SYNC WITH FRONTEND.
+    Mirror: ai-chatbot-dashboard-fe/src/types/index.ts → `DocumentType` union.
+    When adding/removing a type here, you MUST also update:
+      - this enum (DocumentType)
+      - app/services/chunking_config.py (CHUNKING_CONFIGS)
+      - app/services/prompt_templates.py (DOCUMENT_TYPE_PROMPTS)
+      - app/services/entity_extractor.py (TYPE_ENTITY_PRIORITY)
+      - frontend src/types/index.ts (DocumentType union)
+
+    TODO: Expose via API endpoint (GET /api/documents/types) in a later sprint
+    so the backend becomes the single source of truth and the frontend can
+    fetch values + display metadata (labels, colors, descriptions) at runtime.
+    """
 
     GENERAL = "general"           # Default: any generic document
     STORY = "story"               # Novels, short stories, fiction, narrative

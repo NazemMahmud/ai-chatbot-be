@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.enums import DocumentParserType, DocumentSourceType, DocumentStatus
+from app.enums import DocumentParserType, DocumentSourceType, DocumentStatus, DocumentType
 from app.models import Bot, Document, DocumentBot, DocumentChunk
 from app.schemas.document import DocumentListData
 from app.services.bot import BotService
@@ -46,6 +46,7 @@ class DocumentService:
         mime_type: str,
         organization_id: uuid.UUID,
         bot_ids: Optional[list[uuid.UUID]] = None,
+        document_type: DocumentType = DocumentType.GENERAL,
     ) -> Document:
         """
         Create a new document record, save the file, and link to bots.
@@ -58,6 +59,7 @@ class DocumentService:
             mime_type: MIME type
             organization_id: Organization that owns this document
             bot_ids: List of bot UUIDs to associate (optional, can be None/empty)
+            document_type: Document domain type for specialized processing
 
         Returns:
             Created Document instance with bots loaded
@@ -74,6 +76,7 @@ class DocumentService:
             mime_type=mime_type,
             organization_id=organization_id,
             status=DocumentStatus.PENDING,
+            document_type=document_type,
         )
 
         self.db.add(document)
@@ -143,7 +146,7 @@ class DocumentService:
 
             # 3. Chunk text (strategy from config)
             embedding_service = EmbeddingService()
-            chunks = await self._chunk_text(text, document.name, embedding_service)
+            chunks = await self._chunk_text(text, document.name, embedding_service, document.document_type)
 
             if not chunks:
                 raise ValueError("No chunks created from document")
@@ -187,7 +190,7 @@ class DocumentService:
             raise
 
     async def _chunk_text(
-        self, text: str, source_name: str, embedding_service
+        self, text: str, source_name: str, embedding_service, document_type: str = None
     ) -> list[dict]:
         """Choose chunking strategy based on settings."""
         strategy = settings.CHUNKING_STRATEGY.lower()
@@ -196,7 +199,7 @@ class DocumentService:
             chunker = SemanticChunkerService(embedding_service)
             return await chunker.chunk_with_sources(text, source_name)
         else:
-            chunker = CharacterChunkerService()
+            chunker = CharacterChunkerService(document_type=document_type)
             return chunker.chunk_with_sources(text, source_name)
 
     # ------------------------------------------------------------------

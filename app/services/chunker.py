@@ -14,6 +14,7 @@ import re
 from typing import List
 
 from app.config import settings
+from app.services.chunking_config import get_chunking_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,16 @@ class CharacterChunkerService:
         self,
         chunk_size: int = None,
         chunk_overlap: int = None,
+        document_type: str = None,
     ):
-        self.chunk_size = chunk_size or settings.CHUNK_SIZE
-        self.chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
+        if document_type:
+            config = get_chunking_config(document_type)
+            self.chunk_size = chunk_size or config["chunk_size"]
+            self.chunk_overlap = chunk_overlap or config["chunk_overlap"]
+            self.SEPARATORS = config["separators"]
+        else:
+            self.chunk_size = chunk_size or settings.CHUNK_SIZE
+            self.chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
 
     def _split_text_recursive(self, text: str, separators: list[str] | None = None) -> list[str]:
         """
