@@ -22,6 +22,7 @@ from app.schemas.chat import ChatResponse, SourceChunk
 from app.services.bot import BotService
 from app.services.embedding import EmbeddingService
 from app.services.reranker import RerankerService
+from app.services.prompt_templates import get_type_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -739,6 +740,26 @@ class ChatService:
     # RAG: Build prompt
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _get_chunk_doc_type(chunk: DocumentChunk) -> str:
+        """Get document type label for source reference."""
+        if hasattr(chunk, 'document') and chunk.document:
+            doc_type = chunk.document.document_type
+            type_labels = {
+                "story": "Story",
+                "ecommerce": "Product Catalog",
+                "business": "Business Document",
+                "law": "Legal Document",
+                "finance": "Financial Document",
+                "medical": "Medical Document",
+                "technical": "Technical Documentation",
+                "education": "Educational Material",
+                "support": "Support Documentation",
+                "general": "Document",
+            }
+            return type_labels.get(doc_type, "Document")
+        return "Document"
+
     def build_prompt(
         self,
         system_prompt: str,
@@ -746,14 +767,36 @@ class ChatService:
         history: list[Message],
         user_message: str,
     ) -> list[dict]:
-        """Build the message list for the LLM."""
+        """Build the message list for the LLM with type-specific prompts."""
         if context_chunks:
+            # Extract document types from chunks for type-specific guidance
+            doc_types = set()
+            for chunk in context_chunks:
+                if hasattr(chunk, 'document') and chunk.document:
+                    doc_types.add(chunk.document.document_type)
+
+            # Build type-specific prompt guidance
+            type_prompts = []
+            if doc_types:
+                for doc_type in sorted(doc_types):
+                    type_prompt = get_type_prompt(doc_type)
+                    if type_prompt:
+                        type_prompts.append(type_prompt)
+
+            # Compose system prompt: bot's custom + type-specific + citation rules
+            type_guidance = "\n\n".join(type_prompts) if type_prompts else ""
+
             context_text = "\n\n".join(
-                f"[Source {i+1}] {chunk.content}"
+                f"[Source {i+1} | {self._get_chunk_doc_type(chunk)}] {chunk.content}"
                 for i, chunk in enumerate(context_chunks)
             )
+
+            base_system = f"{system_prompt}"
+            if type_guidance:
+                base_system += f"\n\n{type_guidance}"
+
             full_system = (
-                f"{system_prompt}\n\n"
+                f"{base_system}\n\n"
                 "## CRITICAL RULES — YOU MUST FOLLOW THESE\n"
                 "1. Answer using ONLY the document context below. "
                 "You are FORBIDDEN from using your training data or general knowledge.\n"

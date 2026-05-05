@@ -1,7 +1,7 @@
 """Add deleted_at for soft-delete on org_members, org_invitations, ownership_transfers
 
-Revision ID: d4e5f6a7b8c9
-Revises: b7e2a1c9d4f0
+Revision ID: d4e5f6a7b8c9 ( 10th revision )
+Revises: b7e2a1c9d4f0 ( 9th revision )
 Create Date: 2026-04-08
 
 Preserves membership / invitation / transfer rows for SaaS analytics and recovery.
