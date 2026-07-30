@@ -8,6 +8,20 @@ from app.schemas.document import (
     DocumentListData,
     URLIngestRequest,
 )
+from app.schemas.auth import (
+    RegisterRequest,
+    LoginRequest,
+    TokenResponse,
+    UserInfo,
+)
+from app.schemas.chat import (
+    ChatRequest,
+    ChatResponse,
+    SourceChunk,
+    MessageResponse,
+    ConversationResponse,
+    ConversationListData,
+)
 
 __all__ = [
     "ApiResponse",
@@ -21,4 +35,14 @@ __all__ = [
     "DocumentStatusData",
     "DocumentListData",
     "URLIngestRequest",
+    "RegisterRequest",
+    "LoginRequest",
+    "TokenResponse",
+    "UserInfo",
+    "ChatRequest",
+    "ChatResponse",
+    "SourceChunk",
+    "MessageResponse",
+    "ConversationResponse",
+    "ConversationListData",
 ]

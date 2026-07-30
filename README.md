@@ -1,5 +1,59 @@
 # AI Chatbot Backend
 
+A multi-tenant platform for building document-grounded AI chatbots (Retrieval-Augmented Generation). Organizations sign up, create bots, upload documents, and get a chatbot that answers strictly from those documents — reachable through a REST API, an embeddable JavaScript widget, and chat-channel integrations (Telegram / WhatsApp).
+
+Under the hood it runs an asynchronous ingestion pipeline (parse → chunk → embed → store) and an advanced hybrid retrieval pipeline (vector + keyword search, Reciprocal Rank Fusion, cross-encoder reranking, and neighbour expansion) — not a naïve top-k cosine lookup.
+
+Built with FastAPI, async SQLAlchemy 2.0, PostgreSQL + pgvector, a Redis-backed ARQ worker, and local LLM inference via Ollama. Storage, parsing, embedding, and chunking are all swappable behind service abstractions.
+
+>NOTE: Don't follow it as a production ready solution. This will act as a guideline how to proceed to build an AI RAG-based Chatbot
+
+## What this project demonstrates
+For anyone who wants to check this as a work sample, the codebase shows:
+
+* **Advanced RAG, done properly** — hybrid retrieval combining semantic (vector/pgvector) and lexical (Postgres `tsvector`) search, merged with Reciprocal Rank Fusion, re-scored by a cross-encoder reranker (FlashRank, ONNX — no PyTorch), then expanded with neighbouring chunks for context. History-aware query contextualization, semantic chunking, and optional multi-query rewriting and agentic retry-on-refusal are all implemented.
+* **Async-first, decoupled processing** — FastAPI + async SQLAlchemy + `asyncpg` throughout; uploads return `202 Accepted` and heavy work is handed to a Redis-backed **ARQ** worker, so the API stays responsive and processing scales independently.
+* **Multi-tenant SaaS architecture** — organizations, members, invitations, ownership transfers, soft-deletes, and a full **RBAC** layer (roles, permissions, permission checks).
+* **Authentication & security** — JWT access tokens (PyJWT) with Argon2 password hashing (`pwdlib`), token records, and per-endpoint rate limiting.
+* **Multiple delivery surfaces from one core** — REST API, a self-contained embeddable widget served from the backend, and a provider/facade layer for chat-channel integrations.
+* **Production-shaped conventions** — a consistent `ApiResponse` envelope, centralized exception handling, Pydantic v2 validation, Alembic migrations, structured logging, and a DB-verifying health endpoint.
+
+## Feature modules
+| Module                | 	What it does                                                                                          |
+|-----------------------|--------------------------------------------------------------------------------------------------------|
+| Auth	                 | Sign-up (creates a user + organization), sign-in, sign-out, current-user — JWT + Argon2                |
+| Organizations         | 	Create/manage orgs, ownership transfer, membership leave logs, soft-delete                            |
+| Members & Invitations | 	Invite users, accept/decline, manage roles, remove members                                            |
+| RBAC                  | 	Roles, permissions, role–permission mapping, permission checks on actions                             |
+| Bots                  | 	CRUD for chatbots (name, description, per-bot system prompt)                                          |
+| Documents             | 	Upload → async parse/chunk/embed pipeline; status polling; list/detail/delete                         |
+| Chat                  | 	RAG chat with conversation memory and history-aware retrieval                                         |
+| Widget                | 	Public per-bot config + chat endpoints and an embeddable chatbot.js bundle                            |
+| Integrations          | 	Telegram / WhatsApp providers via a facade + webhook handlers (router present; currently not mounted) |
+
+## Tech stack
+| Layer               | 	Technology                                                |
+|---------------------|------------------------------------------------------------|
+| Language            | 	Python 3.11+                                              |
+| Web framework       | 	FastAPI                                                   |
+| ORM / DB access     | 	SQLAlchemy 2.0 (async) + asyncpg                          |
+| Database            | 	PostgreSQL 16 + pgvector                                  |
+| Migrations          | 	Alembic                                                   |
+| Background jobs     | 	ARQ (Redis-backed)                                        |
+| Embeddings / LLM    | 	Ollama (`nomic-embed-text`, 768-dim)                      |
+| Reranking           | 	FlashRank cross-encoder (`ms-marco-MiniLM-L-12-v2`, ONNX) |
+| Auth	               | 	PyJWT + `pwdlib[argon2]`                                  |
+| Object storage      | 	Local filesystem or MinIO / S3                            |
+| Validation / config | 	Pydantic v2 + pydantic-settings                           |
+| Containers          | 	Docker Compose (Postgres, Redis, MinIO)                   |
+
+## Supported file types
+| Format                                             | 	Parser                                              |
+|----------------------------------------------------|------------------------------------------------------|
+| PDF, Word, TXT, Markdown, HTML, CSV                | 		`simple` (fast, text-only via pypdf / python-docx) |
+| Scanned PDFs, images, tables, multi-column layouts | 	`docling` (heavier; OCR + layout, optional install) |
+
+# Getting started
 ## Prerequisites
 
 Install these before anything else. None of them go inside the Python virtual environment — they are standalone services.
@@ -25,9 +79,6 @@ After installing, pull the required models:
 ```bash
 # Embedding model (required — used during document processing)
 ollama pull nomic-embed-text
-
-# LATER: Chat model (required for future chat feature)
-ollama pull smollm3:3b
 ```
 
 Verify Ollama is running:
@@ -126,7 +177,6 @@ All services should show `healthy` or `running`.
 ```bash
 alembic upgrade head
 ```
-
 
 Verify the tables were created:
 ```bash
@@ -260,12 +310,12 @@ Response (202 Accepted — processing starts in the background):
 curl http://localhost:8000/api/documents/doc-uuid-.../status
 ```
 
-| Status | Meaning |
-|--------|---------|
-| `pending` | Queued, waiting for the worker to pick it up |
+| Status       | Meaning                                             |
+|--------------|-----------------------------------------------------|
+| `pending`    | Queued, waiting for the worker to pick it up        |
 | `processing` | Worker is actively parsing, chunking, and embedding |
-| `ready` | Fully processed — searchable embeddings are stored |
-| `failed` | Processing failed — check `error_message` |
+| `ready`      | Fully processed — searchable embeddings are stored  |
+| `failed`     | Processing failed — check `error_message`           |
 
 When ready:
 ```json
@@ -288,29 +338,6 @@ curl "http://localhost:8000/api/documents?bot_id=a1b2c3d4-...&status=ready"
 # All documents regardless of bot
 curl "http://localhost:8000/api/documents"
 ```
-
----
-
-## Supported File Types
-
-| Format | Parser |
-|--------|--------|
-| PDF (`.pdf`) | `simple` or `docling` |
-| Word (`.docx`, `.doc`) | `simple` or `docling` |
-| Text (`.txt`) | `simple` |
-| Markdown (`.md`) | `simple` |
-| HTML (`.html`) | `simple` |
-| CSV (`.csv`) | `simple` |
-| Images (`.png`, `.jpg`, etc.) | `docling` **only** |
-
-**Parser modes:**
-
-- **`simple`** — Fast, lightweight, text-only extraction. Uses `pypdf` for PDFs and `python-docx` for Word files. Cannot handle scanned documents or images. ~170 MB disk, ~200 MB RAM.
-- **`docling`** — Handles everything: scanned PDFs, images (OCR), tables, multi-column layouts, formulas. Requires a separate install:
-  ```bash
-  pip install docling
-  ```
-  ~1.7 GB disk, 3–4 GB RAM spike during parsing.
 
 ---
 
@@ -356,26 +383,26 @@ Expected output:
 
 All settings are in `.env`. Defaults are suitable for local development.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APP_ENV` | `development` | `development` or `production` |
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/chatbot` | PostgreSQL async connection string |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `STORAGE_TYPE` | `local` | `local` (files in `./uploads/`) or `minio` |
-| `STORAGE_LOCAL_PATH` | `./uploads` | Directory for local file storage |
-| `MINIO_ENDPOINT` | `localhost:9000` | MinIO host:port |
-| `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
-| `MINIO_SECRET_KEY` | `minioadmin` | MinIO secret key |
-| `MINIO_BUCKET` | `chatbot` | MinIO bucket name |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Embedding model (must match `EMBED_DIMENSIONS`) |
-| `OLLAMA_LLM_MODEL` | `llama3.2:3b` | Chat LLM model |
-| `EMBED_DIMENSIONS` | `768` | Embedding vector size — must match the model |
-| `DEFAULT_PARSER_TYPE` | `simple` | `simple` or `docling` — used when not specified per upload |
-| `CHUNK_SIZE` | `1000` | Max characters per text chunk |
-| `CHUNK_OVERLAP` | `200` | Overlap characters between consecutive chunks |
-| `WORKER_MAX_JOBS` | `10` | Max concurrent background jobs per worker process |
-| `WORKER_JOB_TIMEOUT` | `3600` | Max seconds a single job can run before timeout |
+| Variable              | Default                                                         | Description                                                |
+|-----------------------|-----------------------------------------------------------------|------------------------------------------------------------|
+| `APP_ENV`             | `development`                                                   | `development` or `production`                              |
+| `DATABASE_URL`        | `postgresql+asyncpg://postgres:postgres@localhost:5432/chatbot` | PostgreSQL async connection string                         |
+| `REDIS_URL`           | `redis://localhost:6379/0`                                      | Redis connection string                                    |
+| `STORAGE_TYPE`        | `local`                                                         | `local` (files in `./uploads/`) or `minio`                 |
+| `STORAGE_LOCAL_PATH`  | `./uploads`                                                     | Directory for local file storage                           |
+| `MINIO_ENDPOINT`      | `localhost:9000`                                                | MinIO host:port                                            |
+| `MINIO_ACCESS_KEY`    | `minioadmin`                                                    | MinIO access key                                           |
+| `MINIO_SECRET_KEY`    | `minioadmin`                                                    | MinIO secret key                                           |
+| `MINIO_BUCKET`        | `chatbot`                                                       | MinIO bucket name                                          |
+| `OLLAMA_BASE_URL`     | `http://localhost:11434`                                        | Ollama server URL                                          |
+| `OLLAMA_EMBED_MODEL`  | `nomic-embed-text`                                              | Embedding model (must match `EMBED_DIMENSIONS`)            |
+| `OLLAMA_LLM_MODEL`    | `llama3.2:3b`                                                   | Chat LLM model                                             |
+| `EMBED_DIMENSIONS`    | `768`                                                           | Embedding vector size — must match the model               |
+| `DEFAULT_PARSER_TYPE` | `simple`                                                        | `simple` or `docling` — used when not specified per upload |
+| `CHUNK_SIZE`          | `1000`                                                          | Max characters per text chunk                              |
+| `CHUNK_OVERLAP`       | `200`                                                           | Overlap characters between consecutive chunks              |
+| `WORKER_MAX_JOBS`     | `10`                                                            | Max concurrent background jobs per worker process          |
+| `WORKER_JOB_TIMEOUT`  | `3600`                                                          | Max seconds a single job can run before timeout            |
 
 ---
 
